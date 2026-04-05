@@ -1,0 +1,8 @@
+# OS
+Thumbs.db
+
+# Editor
+.vscode/
+
+# AutoHotkey runtime artifacts
+*.log
