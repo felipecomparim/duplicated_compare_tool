@@ -3,16 +3,56 @@
 SendMode Input
 SetWorkingDir %A_ScriptDir%
 
+DupToolAlwaysOnTop := false
+hDupToolMain := 0
+hDupToolCompare := 0
+
+DupTool_RunRequested := false
+if IsObject(A_Args)
+{
+	for _, arg in A_Args
+	{
+		if (arg = "--run")
+		{
+			DupTool_RunRequested := true
+			break
+		}
+	}
+}
+
+if !DupTool_RunRequested
+{
+	if 0 >= 1
+	{
+		firstArg = %1%
+		if (firstArg = "--run")
+			DupTool_RunRequested := true
+	}
+}
+
+if (DupTool_RunRequested)
+{
+	SetTimer, DupToolAutoRun, -10
+}
+
+; End of auto-execute section.
+return
+
 ; Hotkey default for standalone version.
 ; Change if it conflicts with your environment.
 ^+y::
 DupTool_RunFromClipboard()
 return
 
+DupToolAutoRun:
+DupTool_RunFromClipboard()
+return
+
 DupTool_RunFromClipboard()
 {
 	global DupToolLblHeader, DupToolLblDup, DupToolDupEdit, DupToolLblDistinct, DupToolDistinctEdit
-	global DupToolBtnCopyDup, DupToolBtnCopyDistinct, DupToolBtnCompare, DupToolBtnClose
+	global DupToolBtnCopyDup, DupToolBtnCopyDistinct, DupToolBtnCompare, DupToolBtnClose, DupToolChkAOT
+	global DupToolAlwaysOnTop, hDupToolMain, hDupToolCompare
 
 	selected_text := Clipboard
 	if (selected_text = "")
@@ -59,7 +99,7 @@ DupTool_RunFromClipboard()
 
 	distinctCount := originals.Count()
 
-	Gui, DupToolMain:New, +AlwaysOnTop +Resize, Duplicated & Distinct lines
+	Gui, DupToolMain:New, +Resize +HwndhDupToolMain, Duplicated & Distinct lines
 	Gui, DupToolMain:Margin, 10, 8
 	Gui, DupToolMain:Add, Text, vDupToolLblHeader cBlue, Found %distinctCount% distinct values - %dupeCount% duplicates
 	Gui, DupToolMain:Add, Text, vDupToolLblDup, Duplicated (case-insensitive) lines:
@@ -69,10 +109,12 @@ DupTool_RunFromClipboard()
 	Gui, DupToolMain:Add, Button, vDupToolBtnCopyDup gDupToolCopyDup, Copy Duplicates
 	Gui, DupToolMain:Add, Button, vDupToolBtnCopyDistinct gDupToolCopyDistinct, Copy Distinct
 	Gui, DupToolMain:Add, Button, vDupToolBtnCompare gDupToolOpenCompare, Compare 2 lists
+	Gui, DupToolMain:Add, Checkbox, vDupToolChkAOT gDupToolToggleAOT, Always on top
 	Gui, DupToolMain:Add, Button, vDupToolBtnClose gDupToolClose, Close
 
 	GuiControl,, DupToolDupEdit, %dupes%
 	GuiControl,, DupToolDistinctEdit, %distinct%
+	GuiControl,, DupToolChkAOT, % DupToolAlwaysOnTop ? 1 : 0
 
 	Gui, DupToolMain:Show, w720 h540
 }
@@ -89,8 +131,30 @@ Clipboard := DupToolDistinctEdit
 TrayTip, Distinct, Distinct list copied., 2, 1
 return
 
+DupToolToggleAOT:
+Gui, DupToolMain:Submit, NoHide
+DupToolAlwaysOnTop := DupToolChkAOT ? true : false
+
+if (DupToolAlwaysOnTop)
+{
+	Gui, DupToolMain:+AlwaysOnTop
+	if WinExist("ahk_id " hDupToolCompare)
+		Gui, DupToolCompare:+AlwaysOnTop
+}
+else
+{
+	Gui, DupToolMain:-AlwaysOnTop
+	if WinExist("ahk_id " hDupToolCompare)
+		Gui, DupToolCompare:-AlwaysOnTop
+}
+return
+
 DupToolOpenCompare:
-Gui, DupToolCompare:New, +AlwaysOnTop +Resize +HwndhDupToolCompare, Compare 2 lists
+Gui, DupToolCompare:New, +Resize +HwndhDupToolCompare, Compare 2 lists
+if (DupToolAlwaysOnTop)
+	Gui, DupToolCompare:+AlwaysOnTop
+else
+	Gui, DupToolCompare:-AlwaysOnTop
 Gui, DupToolCompare:Margin, 10, 8
 Gui, DupToolCompare:Add, Text, vDupToolCmpLblAPrefix, List
 Gui, DupToolCompare:Add, Edit, x+6 yp-2 w140 vDupToolCmpNameA, A
@@ -273,6 +337,7 @@ btnW := 120
 GuiControl, Move, DupToolBtnCopyDup, % "x" marginX " y" btnY " w" btnW " h" btnH
 GuiControl, Move, DupToolBtnCopyDistinct, % "x" (marginX + btnW + btnGap) " y" btnY " w" btnW " h" btnH
 GuiControl, Move, DupToolBtnCompare, % "x" (marginX + (btnW + btnGap) * 2) " y" btnY " w" 140 " h" btnH
+GuiControl, Move, DupToolChkAOT, % "x" (w - marginX - 70 - btnGap - 110) " y" (btnY + 4) " w" 110 " h" (btnH - 2)
 GuiControl, Move, DupToolBtnClose, % "x" (w - marginX - 70) " y" btnY " w" 70 " h" btnH
 return
 
