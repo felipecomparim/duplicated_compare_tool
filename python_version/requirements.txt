@@ -1,0 +1,3 @@
+# Stdlib only (tkinter) — nothing required for normal use.
+# Optional: OS-wide global hotkey Ctrl+Shift+Y (in-app Ctrl+Shift+Y always works).
+# pynput==1.7.6

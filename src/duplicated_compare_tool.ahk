@@ -282,15 +282,15 @@ if (dupesAText = "")
 if (dupesBText = "")
 	dupesBText := "(none)" . CRLF
 
-result := "=== Common to " nameA " and " nameB " (" commonCount ") ===" . CRLF
+result := "=== Comuns em " nameA " e " nameB " (" commonCount ") ===" . CRLF
 result .= common . CRLF
-result .= "=== In " nameA " and not in " nameB " (" onlyACount ") ===" . CRLF
+result .= "=== Em " nameA " e nao em " nameB " (" onlyACount ") ===" . CRLF
 result .= onlyA . CRLF
-result .= "=== In " nameB " and not in " nameA " (" onlyBCount ") ===" . CRLF
+result .= "=== Em " nameB " e nao em " nameA " (" onlyBCount ") ===" . CRLF
 result .= onlyB . CRLF
-result .= "=== Duplicated in " nameA " (" dupesACount ") ===" . CRLF
+result .= "=== Duplicado em " nameA " (" dupesACount ") ===" . CRLF
 result .= dupesAText . CRLF
-result .= "=== Duplicated in " nameB " (" dupesBCount ") ===" . CRLF
+result .= "=== Duplicado em " nameB " (" dupesBCount ") ===" . CRLF
 result .= dupesBText
 
 summary := "Distinct " nameA ": " distinctA.Count() " | Distinct " nameB ": " distinctB.Count() " | Common: " commonCount " | Only " nameA ": " onlyACount " | Only " nameB ": " onlyBCount
