@@ -5,9 +5,9 @@ Python 3 + tkinter (stdlib, sem dependências).
 
 ## Requisitos
 
-- Python 3.10+
+- Python 3.10+ com Tk 8.6+ (o Tk 8.5 do Python 3.9 fornecido pela Apple pode travar a interface).
 - tkinter:
-  - Windows/macOS: já vem com o Python oficial.
+  - Windows/macOS: use o Python oficial; no macOS também é possível instalar com `brew install python@3.13 python-tk@3.13`.
   - Linux (Debian/Ubuntu): `sudo apt install python3-tk`
   - Fedora: `sudo dnf install python3-tkinter`
 
@@ -17,19 +17,24 @@ Python 3 + tkinter (stdlib, sem dependências).
 python duplicated_compare_tool.py
 ```
 
+No macOS com a instalação via Homebrew, execute com `python3.13 duplicated_compare_tool.py`.
+
+No menu `open_hub_logs_lnav.sh` da pasta `Montreal`, escolha a opção `6. Duplicated & Compare Lists Tool` para abrir a interface. O menu seleciona um Python compatível e localiza o programa a partir da própria pasta, independentemente do diretório atual do terminal.
+
 Comportamento inicial = AHK com `--run`: carrega o clipboard e analisa.
-Atalho dentro do app: `Ctrl+Shift+Y` recarrega do clipboard.
+Atalho dentro do app: `Ctrl+Shift+Y` ou `Cmd+Shift+Y` recarrega do clipboard.
 
 ## Interface
 
-Menu principal + abas (o Compare fica numa aba, nunca escondido atrás):
+Janela principal com áreas de texto que acompanham o tamanho da janela. A comparação abre em outra janela:
 
 - File > Quit (`Ctrl+Q`)
 - Edit > Copy duplicates / Copy distinct
 - View > Always on top (sincronizado com o checkbox da aba Duplicates)
-- Tools > Compare 2 lists (`Ctrl+T`, abre a aba de comparação)
-- Aba `Duplicates`: input + duplicadas + distintas.
-- Aba `Compare 2 lists`: listas A/B com `Ln X / Y`, Process, Clear.
+- Tools > Compare 2 lists (`Ctrl+T` ou `Cmd+T`, abre a janela de comparação)
+- Janela principal: input + duplicadas + distintas; o botão Paste from Clipboard carrega e analisa o texto copiado.
+- Janela `Compare 2 lists`: a lista A começa com o conteúdo da entrada principal; as listas A/B têm botões Paste, `Ln X / Y`, Process, Clear e resultado.
+- O ícone com duas listas e uma linha destacada aparece no Dock do macOS e nas janelas do aplicativo.
 
 ## CLI
 
@@ -48,7 +53,7 @@ python duplicated_compare_tool.py --global-hotkey
 ```
 
 No macOS o hotkey global pode pedir permissão de Acessibilidade; o
-atalho interno (`Ctrl+Shift+Y` com a janela focada) funciona sem permissão.
+atalho interno (`Ctrl+Shift+Y` ou `Cmd+Shift+Y` com a janela focada) funciona sem permissão.
 
 ## Paridade com o AHK
 

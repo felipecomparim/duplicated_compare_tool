@@ -15,6 +15,7 @@ Features (same behavior as the AHK version):
 GUI:
 - Main window auto-loads the clipboard (like the AHK hotkey flow) and also
   offers an editable input + "Analyze" so it works without a global hotkey.
+- Compare 2 lists opens in a separate window with its own paste buttons.
 - In-app shortcut Ctrl+Shift+Y reloads from clipboard (works on all 3 OSes).
 - Optional OS-wide global hotkey via ``--global-hotkey`` (needs ``pynput``).
 
@@ -27,15 +28,15 @@ CLI (headless, useful on servers / for tests):
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import tkinter as tk
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import messagebox
 
 APP_TITLE_MAIN = "Duplicated & Distinct lines"
 APP_TITLE_COMPARE = "Compare 2 lists"
-APP_GEOMETRY_MAIN = "720x640"
-APP_GEOMETRY_COMPARE = "980x680"
-
+APP_ICON = Path(__file__).with_name("app_icon.png")
 NO_DUPLICATES_MSG = "No duplicates found."
 NONE_MARKER = "(none)"
 
@@ -169,6 +170,12 @@ def line_indicator(total_text: str, cursor_line: int = 1) -> str:
 # ---------------------------------------------------------------------------
 
 def clipboard_get_text(root: tk.Tk) -> str:
+    if sys.platform == "darwin":
+        try:
+            return subprocess.run(["pbpaste"], capture_output=True, text=True,
+                                  check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            pass
     try:
         return root.clipboard_get()
     except tk.TclError:
@@ -176,6 +183,12 @@ def clipboard_get_text(root: tk.Tk) -> str:
 
 
 def clipboard_set_text(root: tk.Tk, text: str) -> None:
+    if sys.platform == "darwin":
+        try:
+            subprocess.run(["pbcopy"], input=text, text=True, check=True)
+            return
+        except (OSError, subprocess.CalledProcessError):
+            pass
     root.clipboard_clear()
     root.clipboard_append(text or "")
     # Keep ownership while app runs (needed on Linux/X11).
@@ -202,19 +215,33 @@ def _set_text(widget: tk.Text, text: str, readonly=True) -> None:
         widget.configure(state="disabled")
 
 
+def paste_into_text(widget: tk.Text) -> None:
+    """Paste plain text at the cursor, replacing selected text if present."""
+    content = clipboard_get_text(widget.winfo_toplevel())
+    if not content:
+        return
+    try:
+        widget.delete("sel.first", "sel.last")
+    except tk.TclError:
+        pass
+    widget.insert(tk.INSERT, content)
+    widget.focus_set()
+
+
 class ScrolledText(tk.Frame):
-    """Text area showing 12 visible lines; the rest scrolls.
+    """Text area with scrollbars.
 
     Drop-in replacement for tk.Text: the Text API used by this app
     (.get/.insert/.delete/.index/.bind/.focus_set/.configure/.cget)
     is forwarded to the inner widget.
     """
 
-    LINES = 12
+    LINES = 4
 
     def __init__(self, master, height=LINES, readonly=False, **kwargs):
         super().__init__(master)
         kwargs.setdefault("wrap", "none")
+        kwargs.setdefault("width", 40)
         kwargs.setdefault("undo", True)
         self.text = tk.Text(self, height=height, **kwargs)
         vsb = tk.Scrollbar(self, orient="vertical", command=self.text.yview)
@@ -258,12 +285,7 @@ class ScrolledText(tk.Frame):
 
 
 class ComparePanel(tk.Frame):
-    """Compare-2-lists panel.
-
-    Lives as a tab inside the main window, so it can never hide behind it
-    (fixes "Compare 2 lists does not appear" on some macOS/Linux WMs).
-    Logic is a port of the AHK DupToolCompare GUI.
-    """
+    """Compare two lists in a resizable, separate window."""
 
     def __init__(self, master):
         super().__init__(master)
@@ -274,46 +296,54 @@ class ComparePanel(tk.Frame):
         self.pos_b_var = tk.StringVar(value="Ln 1 / 1")
         self.summary_var = tk.StringVar(value="")
 
-        # Bottom dock FIRST (side=bottom): pack() serves earlier-packed widgets
-        # first, so Process/Clear/summary/result keep their space on small
-        # screens and the input lists above shrink instead (all scrollable).
-        # Visual order is unchanged (buttons, summary, result at the bottom).
-        dock = tk.Frame(self)
-        dock.pack(side="bottom", fill="x", padx=10, pady=(4, 10))
-        btns = tk.Frame(dock)
-        btns.pack(fill="x", pady=(0, 6))
+        btns = tk.Frame(self)
+        btns.pack(fill="x", padx=10, pady=(8, 4))
         tk.Button(btns, text="Process", width=12, command=self.process).pack(side="left")
         tk.Button(btns, text="Clear", width=10, command=self.clear).pack(side="left", padx=(8, 0))
+        tk.Label(self, textvariable=self.summary_var, fg="blue",
+                 anchor="w", justify="left").pack(fill="x", padx=10)
 
-        tk.Label(dock, textvariable=self.summary_var, fg="blue",
-                 anchor="w", justify="left").pack(fill="x")
+        panes = tk.Frame(self)
+        panes.pack(fill="both", expand=True, padx=10, pady=(2, 10))
+        panes.grid_columnconfigure(0, weight=1)
+        for row in range(3):
+            panes.grid_rowconfigure(row, weight=1, uniform="areas")
 
-        self.result = ScrolledText(dock, height=ScrolledText.LINES, readonly=True)
-        self.result.pack(fill="x", pady=(2, 0))
-
-        # --- List A header row ---
-        row_a = tk.Frame(self)
-        row_a.pack(fill="x", padx=10, pady=(8, 0))
+        pane_a = tk.Frame(panes)
+        pane_a.grid(row=0, column=0, sticky="nsew")
+        row_a = tk.Frame(pane_a)
+        row_a.pack(fill="x")
         tk.Label(row_a, text="List").pack(side="left")
         tk.Entry(row_a, textvariable=self.name_a_var, width=18).pack(side="left", padx=(6, 0))
         tk.Label(row_a, text="(one line per item):").pack(side="left", padx=(6, 0))
         tk.Label(row_a, textvariable=self.pos_a_var, width=12, anchor="e").pack(side="right")
+        tk.Button(row_a, text="Paste", command=lambda: self.paste_list(self.list_a)).pack(side="right", padx=(4, 0))
 
-        self.list_a = ScrolledText(self, height=ScrolledText.LINES)
-        self.list_a.pack(fill="both", expand=True, padx=10, pady=(2, 0))
+        self.list_a = ScrolledText(pane_a)
+        self.list_a.pack(fill="both", expand=True, pady=(2, 0))
 
-        # --- List B header row ---
-        row_b = tk.Frame(self)
-        row_b.pack(fill="x", padx=10, pady=(8, 0))
+        pane_b = tk.Frame(panes)
+        pane_b.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        row_b = tk.Frame(pane_b)
+        row_b.pack(fill="x")
         tk.Label(row_b, text="List").pack(side="left")
         tk.Entry(row_b, textvariable=self.name_b_var, width=18).pack(side="left", padx=(6, 0))
         tk.Label(row_b, text="(one line per item):").pack(side="left", padx=(6, 0))
         tk.Label(row_b, textvariable=self.pos_b_var, width=12, anchor="e").pack(side="right")
+        tk.Button(row_b, text="Paste", command=lambda: self.paste_list(self.list_b)).pack(side="right", padx=(4, 0))
 
-        self.list_b = ScrolledText(self, height=ScrolledText.LINES)
-        self.list_b.pack(fill="both", expand=True, padx=10, pady=(2, 0))
+        self.list_b = ScrolledText(pane_b)
+        self.list_b.pack(fill="both", expand=True, pady=(2, 0))
+
+        pane_result = tk.Frame(panes)
+        pane_result.grid(row=2, column=0, sticky="nsew", pady=(6, 0))
+        tk.Label(pane_result, text="Result:", anchor="w").pack(fill="x")
+        self.result = ScrolledText(pane_result, readonly=True)
+        self.result.pack(fill="both", expand=True, pady=(2, 0))
 
         for widget in (self.list_a, self.list_b):
+            for seq in ("<Command-v>", "<Control-v>"):
+                widget.bind(seq, lambda _e, w=widget: self.paste_list(w) or "break")
             widget.bind("<KeyRelease>", self._on_edit_activity)
             widget.bind("<ButtonRelease-1>", self._on_edit_activity)
             widget.bind("<FocusIn>", self._on_edit_activity)
@@ -324,6 +354,10 @@ class ComparePanel(tk.Frame):
         self.update_line_info()
 
     # -- actions --
+    def paste_list(self, widget: ScrolledText) -> None:
+        paste_into_text(widget)
+        self.update_line_info()
+
     def process(self) -> None:
         data = compare_texts(
             self.list_a.get("1.0", "end-1c"),
@@ -356,12 +390,16 @@ class ComparePanel(tk.Frame):
 
 
 class CompareWindow(tk.Toplevel):
-    """Optional detached Compare window (same panel, separate window)."""
+    """Separate Compare window."""
 
     def __init__(self, master: tk.Tk):
         super().__init__(master)
         self.title(APP_TITLE_COMPARE)
-        self.geometry(APP_GEOMETRY_COMPARE)
+        if master.app_icon is not None:
+            self.iconphoto(False, master.app_icon)
+        self.geometry(f"{min(900, max(520, self.winfo_screenwidth() - 80))}x"
+                      f"{min(700, max(380, self.winfo_screenheight() - 120))}")
+        self.minsize(520, 380)
         try:
             if master.attributes("-topmost"):
                 self.attributes("-topmost", True)
@@ -378,53 +416,43 @@ class CompareWindow(tk.Toplevel):
 
 
 class DuplicatesApp(tk.Tk):
-    """Main window: menu bar (File/Edit/View/Tools) + tabs."""
+    """Main window for duplicate analysis."""
 
     def __init__(self, initial_text: str = "", auto_clipboard: bool = True):
         super().__init__()
         self.title(APP_TITLE_MAIN)
-        # Fit smaller (notebook) screens: never open taller than the display,
-        # otherwise the bottom bar starts off-screen.
+        self.app_icon = None
+        try:
+            self.app_icon = tk.PhotoImage(file=str(APP_ICON), master=self)
+            self.iconphoto(True, self.app_icon)
+        except tk.TclError:
+            pass
         try:
             sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         except tk.TclError:
             sw, sh = 1280, 800
-        w = min(980, max(640, sw - 40))
-        h = min(850, max(520, sh - 80))
+        w = min(760, max(520, sw - 80))
+        h = min(650, max(380, sh - 120))
         self.geometry(f"{w}x{h}")
-        self.minsize(640, 480)
+        self.minsize(520, 380)
         self.topmost_var = tk.BooleanVar(value=False)
         self.header_var = tk.StringVar(value="Paste lines and click Analyze.")
-        # Strong reference for the optional detached window (avoids GC flash).
         self.compare_window: CompareWindow | None = None
 
         self._build_menu()
 
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True)
-
-        # --- Tab 1: Duplicates ---
-        dup_tab = tk.Frame(self.notebook)
-        self.notebook.add(dup_tab, text="Duplicates")
-
-        tk.Label(dup_tab, text="Input (one line per item):", anchor="w").pack(fill="x", padx=10, pady=(8, 0))
-        self.input_text = ScrolledText(dup_tab, height=9)
-        self.input_text.pack(fill="both", expand=False, padx=10, pady=(2, 0))
-
-        in_btns = tk.Frame(dup_tab)
-        in_btns.pack(fill="x", padx=10, pady=6)
-        tk.Button(in_btns, text="Paste from Clipboard (Ctrl+Shift+Y)",
+        in_btns = tk.Frame(self)
+        in_btns.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Button(in_btns, text="Paste from Clipboard (Ctrl/Cmd+Shift+Y)",
                   command=self.load_from_clipboard).pack(side="left")
         tk.Button(in_btns, text="Analyze", width=12,
                   command=self.analyze).pack(side="left", padx=(8, 0))
         tk.Button(in_btns, text="Clear Input", width=12,
                   command=self.clear_input).pack(side="left", padx=(8, 0))
 
-        # Bottom action bar docks FIRST (side=bottom): pack() gives space to
-        # earlier-packed widgets first, so docking the bar first guarantees it
-        # is never pushed off-screen — the text areas above shrink instead
-        # (they are scrollable, 12 visible lines when space allows).
-        out_btns = tk.Frame(dup_tab)
+        tk.Label(self, textvariable=self.header_var, fg="blue", anchor="w").pack(fill="x", padx=10)
+
+        out_btns = tk.Frame(self)
         out_btns.pack(side="bottom", fill="x", padx=10, pady=8)
         tk.Button(out_btns, text="Copy Duplicates", command=self.copy_dupes).pack(side="left")
         tk.Button(out_btns, text="Copy Distinct", command=self.copy_distinct).pack(side="left", padx=(8, 0))
@@ -433,38 +461,53 @@ class DuplicatesApp(tk.Tk):
                        command=self.toggle_topmost).pack(side="left", padx=(12, 0))
         tk.Button(out_btns, text="Close", width=10, command=self.destroy).pack(side="right")
 
-        tk.Label(dup_tab, textvariable=self.header_var, fg="blue", anchor="w").pack(fill="x", padx=10)
+        panes = tk.Frame(self)
+        panes.pack(fill="both", expand=True, padx=10, pady=(2, 0))
+        panes.grid_columnconfigure(0, weight=1)
+        for row in range(3):
+            panes.grid_rowconfigure(row, weight=1, uniform="areas")
 
-        tk.Label(dup_tab, text="Duplicated (case-insensitive) lines:", anchor="w").pack(fill="x", padx=10)
-        self.dup_text = ScrolledText(dup_tab, height=9, readonly=True)
-        self.dup_text.pack(fill="both", expand=True, padx=10, pady=(2, 0))
+        pane_input = tk.Frame(panes)
+        pane_input.grid(row=0, column=0, sticky="nsew")
+        tk.Label(pane_input, text="Input (one line per item):", anchor="w").pack(fill="x")
+        self.input_text = ScrolledText(pane_input)
+        self.input_text.pack(fill="both", expand=True, pady=(2, 0))
 
-        tk.Label(dup_tab, text="Distinct values (case-insensitive) from selection:",
-                 anchor="w").pack(fill="x", padx=10, pady=(6, 0))
-        self.distinct_text = ScrolledText(dup_tab, height=ScrolledText.LINES, readonly=True)
-        self.distinct_text.pack(fill="both", expand=True, padx=10, pady=(2, 0))
+        pane_dup = tk.Frame(panes)
+        pane_dup.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        tk.Label(pane_dup, text="Duplicated (case-insensitive) lines:", anchor="w").pack(fill="x")
+        self.dup_text = ScrolledText(pane_dup, readonly=True)
+        self.dup_text.pack(fill="both", expand=True, pady=(2, 0))
 
-        # --- Tab 2: Compare 2 lists (embedded: always visible, never hidden) ---
-        compare_tab = tk.Frame(self.notebook)
-        self.notebook.add(compare_tab, text="Compare 2 lists")
-        self.compare_panel = ComparePanel(compare_tab)
-        self.compare_panel.pack(fill="both", expand=True)
+        pane_distinct = tk.Frame(panes)
+        pane_distinct.grid(row=2, column=0, sticky="nsew", pady=(6, 0))
+        tk.Label(pane_distinct, text="Distinct values (case-insensitive) from selection:",
+                 anchor="w").pack(fill="x")
+        self.distinct_text = ScrolledText(pane_distinct, readonly=True)
+        self.distinct_text.pack(fill="both", expand=True, pady=(2, 0))
+        for seq in ("<Command-v>", "<Control-v>"):
+            self.input_text.bind(seq, lambda _e: self.paste_input() or "break")
 
         # In-app shortcut (works on macOS/Linux/Windows while the app is focused).
-        for seq in ("<Control-Shift-Y>", "<Control-Shift-y>"):
+        for seq in ("<Control-Shift-Y>", "<Control-Shift-y>",
+                    "<Command-Shift-Y>", "<Command-Shift-y>"):
             self.bind_all(seq, lambda _e: self.load_from_clipboard())
 
         if initial_text:
             self.input_text.insert("1.0", initial_text)
             self.analyze()
         elif auto_clipboard:
-            self.after(50, self.load_from_clipboard)
+            self.after(150, lambda: self.load_from_clipboard(silent=True))
 
     # -- actions --
-    def load_from_clipboard(self) -> None:
+    def paste_input(self) -> None:
+        paste_into_text(self.input_text)
+
+    def load_from_clipboard(self, silent: bool = False) -> None:
         text = clipboard_get_text(self)
         if not text.strip():
-            messagebox.showwarning("Duplicates", "Clipboard is empty.", parent=self)
+            if not silent:
+                messagebox.showwarning("Duplicates", "Clipboard has no text.", parent=self)
             return
         self.input_text.delete("1.0", tk.END)
         self.input_text.insert("1.0", text)
@@ -531,23 +574,15 @@ class DuplicatesApp(tk.Tk):
             pass
 
     def show_compare(self) -> None:
-        """Switch to the embedded Compare tab — it cannot hide behind."""
-        try:
-            self.notebook.select(1)
-        except tk.TclError:
-            pass
-        try:
-            self.lift()
-            self.compare_panel.list_a.focus_set()
-        except tk.TclError:
-            pass
+        """Open Compare in its own window."""
+        self.open_compare_window()
 
     def open_compare(self) -> None:
         """Back-compat alias (button/shortcut target)."""
         self.show_compare()
 
     def open_compare_window(self) -> None:
-        """Open Compare in a detached window (optional alternative)."""
+        """Open or focus the separate Compare window."""
         if self.compare_window is not None:
             try:
                 if self.compare_window.winfo_exists():
@@ -561,6 +596,10 @@ class DuplicatesApp(tk.Tk):
         win = CompareWindow(self)
         self.compare_window = win
         win.protocol("WM_DELETE_WINDOW", self._on_compare_close)
+        current_input = self.input_text.get("1.0", "end-1c")
+        if current_input.strip():
+            win.panel.list_a.insert("1.0", current_input)
+            win.panel.update_line_info()
         try:
             win.deiconify()
             win.lift()
@@ -689,6 +728,11 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.no_gui:
         return run_headless(args)
+
+    if sys.version_info < (3, 10) or tk.TkVersion < 8.6:
+        print("GUI requires Python 3.10+ with Tk 8.6+. On macOS, install "
+              "with: brew install python@3.13 python-tk@3.13", file=sys.stderr)
+        return 1
 
     initial = read_source_text(args)
     app = DuplicatesApp(initial_text=initial, auto_clipboard=not initial)
